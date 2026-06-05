@@ -49,6 +49,12 @@ const COUNTRY_TO_ISO: Record<string, string> = {
   'Puerto Rico': 'PRI',
 }
 
+// Reverse map: alpha-3 → primary country name (first entry wins)
+const ISO_TO_COUNTRY: Record<string, string> = {}
+for (const [name, iso] of Object.entries(COUNTRY_TO_ISO)) {
+  if (!ISO_TO_COUNTRY[iso]) ISO_TO_COUNTRY[iso] = name
+}
+
 interface TooltipState {
   x: number
   y: number
@@ -56,20 +62,26 @@ interface TooltipState {
   count: number
 }
 
-export default function WorldMap({ data }: { data: CountryStat[] }) {
+interface Props {
+  data: CountryStat[]
+  onCountryClick?: (countryName: string) => void
+}
+
+export default function WorldMap({ data, onCountryClick }: Props) {
   const [geoData, setGeoData] = useState<any>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const gRef = useRef<any>(null)
   const svgRef = useRef<any>(null)
   const zoomRef = useRef<any>(null)
+  const onClickRef = useRef(onCountryClick)
+  onClickRef.current = onCountryClick
 
   const countMap = new Map<string, { count: number; name: string }>()
   for (const d of data) {
     const iso = COUNTRY_TO_ISO[d.country] ?? d.isoCode
     if (iso) countMap.set(iso, { count: d.count, name: d.country })
   }
-
   const max = Math.max(...Array.from(countMap.values()).map(v => v.count), 1)
 
   useEffect(() => {
@@ -81,7 +93,7 @@ export default function WorldMap({ data }: { data: CountryStat[] }) {
   useEffect(() => {
     if (!geoData) return
     renderMap()
-  }, [geoData, data])
+  }, [geoData, data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function renderMap() {
     if (!containerRef.current || !geoData) return
@@ -102,6 +114,8 @@ export default function WorldMap({ data }: { data: CountryStat[] }) {
       .attr('width', '100%')
       .attr('height', height)
       .attr('viewBox', `0 0 ${width} ${height}`)
+      // Use actual theme hex values — D3 SVG attrs can't use CSS vars
+      .style('background', '#0d0f11')
       .style('cursor', 'grab')
 
     svgRef.current = svg
@@ -124,39 +138,44 @@ export default function WorldMap({ data }: { data: CountryStat[] }) {
       .attr('d', path as any)
       .attr('fill', (d: any) => {
         const alpha3 = numericToAlpha3[d.id]
-        if (!alpha3) return '#2c3440'
+        if (!alpha3) return '#1e242d'
         const entry = countMap.get(alpha3)
-        if (!entry) return '#2c3440'
-        const intensity = Math.sqrt(entry.count / max)
-        const g2 = Math.round(192 * intensity)
-        return `rgb(${Math.round(48 * intensity)}, ${g2}, 48)`
+        if (!entry) return '#1e242d'
+        // Amber gradient: 0.15 base opacity + sqrt scale for differentiation
+        const intensity = 0.15 + 0.85 * Math.sqrt(entry.count / max)
+        return `rgba(245, 166, 35, ${intensity.toFixed(3)})`
       })
-      .attr('stroke', '#14181c')
+      .attr('stroke', '#0d0f11')
       .attr('stroke-width', 0.5)
       .style('cursor', 'pointer')
       .on('mousemove', (event: MouseEvent, d: any) => {
         const alpha3 = numericToAlpha3[d.id]
         const entry = alpha3 ? countMap.get(alpha3) : undefined
         const countryName = alpha3
-          ? Object.entries(COUNTRY_TO_ISO).find(([, iso]) => iso === alpha3)?.[0] ?? alpha3
+          ? (entry?.name ?? ISO_TO_COUNTRY[alpha3] ?? alpha3)
           : null
         if (!countryName) return
         const rect = container.getBoundingClientRect()
         setTooltip({
           x: event.clientX - rect.left,
           y: event.clientY - rect.top,
-          country: entry?.name ?? countryName,
+          country: countryName,
           count: entry?.count ?? 0,
         })
       })
       .on('mouseleave', () => setTooltip(null))
+      .on('click', (_event: MouseEvent, d: any) => {
+        const alpha3 = numericToAlpha3[d.id]
+        if (!alpha3) return
+        const entry = countMap.get(alpha3)
+        const countryName = entry?.name ?? ISO_TO_COUNTRY[alpha3] ?? null
+        if (countryName && onClickRef.current) onClickRef.current(countryName)
+      })
 
-    // Zoom behavior
     const zoomBehavior = zoom()
       .scaleExtent([1, 8])
       .on('zoom', (event) => {
         g.attr('transform', event.transform)
-        svg.style('cursor', event.transform.k > 1 ? 'grab' : 'grab')
       })
 
     svg.call(zoomBehavior as any)
@@ -166,57 +185,85 @@ export default function WorldMap({ data }: { data: CountryStat[] }) {
   async function handleReset() {
     if (!svgRef.current || !zoomRef.current) return
     const { zoomIdentity } = await import('d3-zoom')
-    svgRef.current
-      .transition()
-      .duration(300)
-      .call(zoomRef.current.transform, zoomIdentity)
+    svgRef.current.transition().duration(300).call(zoomRef.current.transform, zoomIdentity)
   }
 
-  const topCountries = data.slice(0, 10)
-
   return (
-    <div className="bg-[#1c2228] rounded-xl p-5">
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-[#99aabb]">production countries</p>
-        {geoData && (
-          <button
-            onClick={handleReset}
-            className="text-xs text-[#456] hover:text-[#99aabb] bg-[#14181c] px-2 py-1 rounded transition-colors"
-          >
-            reset zoom
-          </button>
-        )}
-      </div>
+    <div style={{ position: 'relative' }}>
+      {geoData && (
+        <button
+          onClick={handleReset}
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            zIndex: 10,
+            padding: '4px 10px',
+            fontSize: 11,
+            color: 'var(--text-dim)',
+            backgroundColor: 'var(--surface-raised)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)',
+            cursor: 'pointer',
+          }}
+        >
+          reset zoom
+        </button>
+      )}
 
-      <div className="relative" ref={containerRef}>
+      <div ref={containerRef}>
         {!geoData && (
-          <div className="h-64 flex items-center justify-center text-[#456] text-sm">
+          <div
+            style={{
+              height: 300,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-dim)',
+              fontSize: 13,
+              fontFamily: 'JetBrains Mono, monospace',
+            }}
+          >
             loading map...
           </div>
         )}
-        {tooltip && (
-          <div
-            className="absolute z-10 bg-[#2c3440] rounded-lg px-3 py-2 text-sm pointer-events-none"
-            style={{ left: tooltip.x + 10, top: tooltip.y - 40 }}
-          >
-            <p className="text-white font-medium">{tooltip.country}</p>
-            {tooltip.count > 0
-              ? <p className="text-[#00c030]">{tooltip.count} films</p>
-              : <p className="text-[#456]">no films watched</p>
-            }
-          </div>
-        )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-6">
-        {topCountries.map((c, i) => (
-          <div key={c.country} className="text-center">
-            <p className="text-[#456] text-xs mb-1">{i + 1}</p>
-            <p className="text-white text-sm font-medium truncate">{c.country}</p>
-            <p className="text-[#00c030] text-sm">{c.count}</p>
+      {tooltip && (
+        <div
+          style={{
+            position: 'absolute',
+            left: tooltip.x + 12,
+            top: tooltip.y - 52,
+            zIndex: 20,
+            backgroundColor: 'var(--surface-raised)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '6px 10px',
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>
+            {tooltip.country}
           </div>
-        ))}
-      </div>
+          {tooltip.count > 0 ? (
+            <div
+              style={{
+                fontSize: 11,
+                fontFamily: 'JetBrains Mono, monospace',
+                color: 'var(--accent)',
+                marginTop: 2,
+              }}
+            >
+              {tooltip.count} {tooltip.count === 1 ? 'film' : 'films'}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+              not yet explored
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
