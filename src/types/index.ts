@@ -84,6 +84,9 @@ export interface Film {
   tmdbId?: number
   tmdbData?: TMDBData
 
+  // Computed during enrichment
+  releaseToWatchGapDays?: number   // days between TMDB release date and first watch
+
   // Enrichment status
   enriched: boolean
   enrichError?: boolean
@@ -99,23 +102,56 @@ export interface DiaryEntry {
 
 export interface TMDBData {
   tmdbId: number
+
+  // Basic metadata
+  originalTitle: string
+  tagline?: string
+  overview?: string
+  status?: string
+  tmdbReleaseDate?: string
+  budget?: number
+  revenue?: number
+  popularity?: number
+  voteCount?: number
+  imdbId?: string
+
+  // Media
+  posterPath?: string
+  backdropPath?: string
+
+  // Classification
   genres: string[]
+  keywords: string[]
+  isAdaptation: boolean
   originalLanguage: string
   spokenLanguages: string[]
   productionCountries: string[]
+
+  // Production companies
+  productionCompanies: {
+    id: number
+    name: string
+    originCountry: string
+  }[]
+
+  // Crew
   directors: string[]
   cast: string[]                 // top 10
   cinematographers: string[]
   composers: string[]
   screenwriters: string[]
   editors: string[]
-  runtime?: number
-  tmdbRating?: number            // vote_average
-  posterPath?: string
+
+  // Collection / franchise
   collection?: {
     id: number
     name: string
   }
+
+  // Ratings / runtime
+  tmdbRating?: number            // vote_average (out of 10)
+  runtime?: number
+
   fetchedAt: string
 }
 

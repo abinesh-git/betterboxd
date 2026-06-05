@@ -49,7 +49,7 @@ async function fetchTMDBBySearch(
 }
 
 async function fetchTMDBDetails(tmdbId: number): Promise<TMDBData | null> {
-  const url = `${BASE}/movie/${tmdbId}?append_to_response=credits&language=en-US`
+  const url = `${BASE}/movie/${tmdbId}?append_to_response=credits,keywords&language=en-US`
   const res = await fetch(url, { headers })
   if (!res.ok) return null
 
@@ -81,30 +81,77 @@ async function fetchTMDBDetails(tmdbId: number): Promise<TMDBData | null> {
     .slice(0, 10)
     .map((c: any) => c.name as string)
 
+  const keywords: string[] = (d.keywords?.keywords ?? []).map((k: any) => k.name as string)
+  const isAdaptation = keywords.some(k => k.toLowerCase().includes('based on'))
+
+  const productionCompanies = (d.production_companies ?? []).map((c: any) => ({
+    id: c.id as number,
+    name: c.name as string,
+    originCountry: c.origin_country as string,
+  }))
+
   return {
     tmdbId,
+
+    // Basic metadata
+    originalTitle: (d.original_title as string) ?? '',
+    tagline: d.tagline || undefined,
+    overview: d.overview || undefined,
+    status: d.status || undefined,
+    tmdbReleaseDate: d.release_date || undefined,
+    budget: d.budget > 0 ? (d.budget as number) : undefined,
+    revenue: d.revenue > 0 ? (d.revenue as number) : undefined,
+    popularity: d.popularity ?? undefined,
+    voteCount: d.vote_count ?? undefined,
+    imdbId: d.imdb_id || undefined,
+
+    // Media
+    posterPath: d.poster_path || undefined,
+    backdropPath: d.backdrop_path || undefined,
+
+    // Classification
     genres: (d.genres ?? []).map((g: any) => g.name as string),
+    keywords,
+    isAdaptation,
     originalLanguage: d.original_language ?? '',
-    spokenLanguages: (d.spoken_languages ?? []).map(
-      (l: any) => l.english_name as string
-    ),
-    productionCountries: (d.production_countries ?? []).map(
-      (c: any) => c.name as string
-    ),
+    spokenLanguages: (d.spoken_languages ?? []).map((l: any) => l.english_name as string),
+    productionCountries: (d.production_countries ?? []).map((c: any) => c.name as string),
+
+    // Companies
+    productionCompanies,
+
+    // Crew
     directors,
     cast,
     cinematographers,
     composers,
     screenwriters,
     editors,
-    runtime: d.runtime ?? undefined,
-    tmdbRating: d.vote_average ?? undefined,
-    posterPath: d.poster_path ?? undefined,
+
+    // Collection
     collection: d.belongs_to_collection
       ? { id: d.belongs_to_collection.id, name: d.belongs_to_collection.name }
       : undefined,
+
+    // Ratings / runtime
+    tmdbRating: d.vote_average || undefined,
+    runtime: d.runtime || undefined,
+
     fetchedAt: new Date().toISOString(),
   }
+}
+
+function computeReleaseToWatchGap(film: Film, tmdbReleaseDate?: string): number | undefined {
+  if (!tmdbReleaseDate) return undefined
+  const releaseMs = new Date(tmdbReleaseDate).getTime()
+  if (isNaN(releaseMs)) return undefined
+  // Use earliest diary watchedDate, fall back to dateAdded
+  const watchDates = film.diaryEntries.map(e => e.watchedDate).filter(Boolean).sort()
+  const firstWatchStr = watchDates[0] ?? film.dateAdded
+  if (!firstWatchStr) return undefined
+  const watchMs = new Date(firstWatchStr).getTime()
+  if (isNaN(watchMs)) return undefined
+  return Math.round((watchMs - releaseMs) / 86_400_000)
 }
 
 export async function enrichFilm(film: Film): Promise<Film> {
@@ -119,7 +166,9 @@ export async function enrichFilm(film: Film): Promise<Film> {
       return { ...film, enriched: true, enrichError: true }
     }
 
-    return { ...film, tmdbId, tmdbData, enriched: true, enrichError: false }
+    const releaseToWatchGapDays = computeReleaseToWatchGap(film, tmdbData.tmdbReleaseDate)
+
+    return { ...film, tmdbId, tmdbData, releaseToWatchGapDays, enriched: true, enrichError: false }
   } catch {
     return { ...film, enriched: true, enrichError: true }
   }

@@ -99,6 +99,7 @@ export async function parseLetterboxdZip(file: File): Promise<ParseResult> {
       diaryEntries: [],
       onWatchlist: watchlistMap.has(uri),
       watchlistDate: watchlistMap.get(uri),
+      releaseToWatchGapDays: undefined,
       enriched: false,
     })
   }
@@ -143,6 +144,7 @@ export async function parseLetterboxdZip(file: File): Promise<ParseResult> {
         diaryEntries: [entry],
         onWatchlist: watchlistMap.has(uri),
         watchlistDate: watchlistMap.get(uri),
+        releaseToWatchGapDays: undefined,
         enriched: false,
       })
     }
