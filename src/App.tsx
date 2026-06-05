@@ -19,6 +19,8 @@ import WatchlistPage from './pages/WatchlistPage'
 import InsightsPage from './pages/InsightsPage'
 import DiscoverPage from './pages/DiscoverPage'
 import WrappedPage from './pages/WrappedPage'
+import PrivacyPage from './pages/PrivacyPage'
+import BreakdownPage from './pages/BreakdownPage'
 
 function RootRoute() {
   const { profile } = useAppStore()
@@ -72,6 +74,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<RootRoute />} />
         <Route path="/upload" element={<UploadPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
         <Route element={<RequireData />}>
           <Route element={<AppLayout />}>
             <Route path="/overview" element={<OverviewPage />} />
@@ -87,6 +90,7 @@ export default function App() {
             <Route path="/insights" element={<InsightsPage />} />
             <Route path="/discover" element={<DiscoverPage />} />
             <Route path="/wrapped" element={<WrappedPage />} />
+            <Route path="/breakdown" element={<BreakdownPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

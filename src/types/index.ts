@@ -219,3 +219,16 @@ export interface RatingBucket {
   count: number
   percentage: number
 }
+
+// ─── Cached person (TMDB) ────────────────────────────────────────────────────
+
+export interface CachedPerson {
+  tmdbPersonId: number
+  name: string
+  profilePath?: string
+  biography?: string
+  birthday?: string
+  placeOfBirth?: string
+  knownForDepartment?: string
+  fetchedAt: string
+}

@@ -109,13 +109,18 @@ export default function WorldMap({ data, onCountryClick }: Props) {
 
     select(container).select('svg').remove()
 
+    // Read CSS variable values at render time — D3 SVG .attr() can't use var()
+    const cs = getComputedStyle(document.documentElement)
+    const bgColor = cs.getPropertyValue('--bg').trim()
+    const noDataColor = cs.getPropertyValue('--surface-raised').trim()
+    const accentRgb = cs.getPropertyValue('--accent-rgb').trim()
+
     const svg = select(container)
       .append('svg')
       .attr('width', '100%')
       .attr('height', height)
       .attr('viewBox', `0 0 ${width} ${height}`)
-      // Use actual theme hex values — D3 SVG attrs can't use CSS vars
-      .style('background', '#0d0f11')
+      .style('background', 'var(--bg)')
       .style('cursor', 'grab')
 
     svgRef.current = svg
@@ -138,14 +143,14 @@ export default function WorldMap({ data, onCountryClick }: Props) {
       .attr('d', path as any)
       .attr('fill', (d: any) => {
         const alpha3 = numericToAlpha3[d.id]
-        if (!alpha3) return '#1e242d'
+        if (!alpha3) return noDataColor
         const entry = countMap.get(alpha3)
-        if (!entry) return '#1e242d'
+        if (!entry) return noDataColor
         // Amber gradient: 0.15 base opacity + sqrt scale for differentiation
         const intensity = 0.15 + 0.85 * Math.sqrt(entry.count / max)
-        return `rgba(245, 166, 35, ${intensity.toFixed(3)})`
+        return `rgba(${accentRgb || '245, 166, 35'}, ${intensity.toFixed(3)})`
       })
-      .attr('stroke', '#0d0f11')
+      .attr('stroke', bgColor || '#0d0f11')
       .attr('stroke-width', 0.5)
       .style('cursor', 'pointer')
       .on('mousemove', (event: MouseEvent, d: any) => {

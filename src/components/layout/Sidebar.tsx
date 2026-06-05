@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Clapperboard, BarChart2, CalendarDays,
-  Users, Globe, Library, Tag, Bookmark, Columns2,
-  Lightbulb, Compass, Sparkles, Upload,
+  Users, Globe, Library, Layers, Bookmark, Columns2,
+  Lightbulb, Compass, Sparkles, Upload, RefreshCw,
 } from 'lucide-react'
+import { reEnrichMissingFields } from '../../lib/tmdb'
+import Logo from '../ui/Logo'
 
 const NAV_GROUPS = [
   [
@@ -17,7 +19,7 @@ const NAV_GROUPS = [
   ],
   [
     { path: '/lists', label: 'Lists', icon: Library },
-    { path: '/tags', label: 'Tags', icon: Tag },
+    { path: '/breakdown', label: 'Breakdown', icon: Layers },
     { path: '/watchlist', label: 'Watchlist', icon: Bookmark },
     { path: '/compare', label: 'Compare', icon: Columns2 },
   ],
@@ -28,9 +30,46 @@ const NAV_GROUPS = [
   ],
 ]
 
+type UpdateState =
+  | { status: 'idle' }
+  | { status: 'running'; completed: number; total: number }
+  | { status: 'done'; updated: number; failed: number }
+  | { status: 'nothing' }
+
 export default function Sidebar() {
   const [expanded, setExpanded] = useState(false)
+  const [update, setUpdate] = useState<UpdateState>({ status: 'idle' })
   const navigate = useNavigate()
+
+  async function handleUpdateFilmData() {
+    if (update.status === 'running') return
+    setUpdate({ status: 'running', completed: 0, total: 0 })
+    await reEnrichMissingFields((completed, total, failed) => {
+      if (total === 0) {
+        setUpdate({ status: 'nothing' })
+      } else {
+        setUpdate({ status: 'running', completed, total })
+        if (completed === total) {
+          setUpdate({ status: 'done', updated: total - failed, failed })
+        }
+      }
+    })
+  }
+
+  const updateLabel = (): string => {
+    switch (update.status) {
+      case 'running':
+        return update.total > 0
+          ? `${update.completed}/${update.total}`
+          : 'checking...'
+      case 'done':
+        return `updated ${update.updated}`
+      case 'nothing':
+        return 'all up to date'
+      default:
+        return 'Update film data'
+    }
+  }
 
   return (
     <nav
@@ -46,40 +85,8 @@ export default function Sidebar() {
       }}
     >
       {/* Logo */}
-      <div className="flex items-center flex-shrink-0" style={{ height: 56, paddingLeft: 16 }}>
-        <div
-          className="flex items-center justify-center flex-shrink-0"
-          style={{
-            width: 24,
-            height: 24,
-            backgroundColor: 'var(--accent)',
-            borderRadius: 'var(--radius-sm)',
-          }}
-        >
-          <span style={{
-            color: '#0d0f11',
-            fontSize: 11,
-            fontFamily: 'Clash Display, sans-serif',
-            fontWeight: 700,
-            lineHeight: 1,
-          }}>
-            C
-          </span>
-        </div>
-        <span
-          className="whitespace-nowrap overflow-hidden"
-          style={{
-            marginLeft: 10,
-            fontFamily: 'Clash Display, sans-serif',
-            fontWeight: 600,
-            fontSize: 15,
-            color: 'var(--text-primary)',
-            opacity: expanded ? 1 : 0,
-            transition: 'opacity 0.15s ease',
-          }}
-        >
-          Cinestamp
-        </span>
+      <div className="flex items-center flex-shrink-0" style={{ height: 56, paddingLeft: 16, overflow: 'hidden' }}>
+        <Logo size="sm" labelOpacity={expanded ? 1 : 0} />
       </div>
 
       {/* Nav items */}
@@ -127,9 +134,56 @@ export default function Sidebar() {
         ))}
       </div>
 
-      {/* Re-import */}
+      {/* Bottom actions */}
       <div className="flex-shrink-0" style={{ padding: '0 8px 16px' }}>
         <div style={{ height: 1, backgroundColor: 'var(--border)', marginBottom: 6 }} />
+
+        {/* Update film data */}
+        <button
+          onClick={handleUpdateFilmData}
+          disabled={update.status === 'running'}
+          className="flex items-center w-full transition-colors"
+          style={{
+            gap: 10,
+            padding: '8px 10px',
+            borderRadius: 'var(--radius-sm)',
+            color: update.status === 'done' || update.status === 'nothing'
+              ? 'var(--success)'
+              : 'var(--text-dim)',
+            backgroundColor: 'transparent',
+            border: 'none',
+            cursor: update.status === 'running' ? 'not-allowed' : 'pointer',
+            marginBottom: 2,
+          }}
+          onMouseEnter={e => {
+            if (update.status !== 'running') e.currentTarget.style.color = 'var(--text-secondary)'
+          }}
+          onMouseLeave={e => {
+            if (update.status !== 'running' && update.status !== 'done' && update.status !== 'nothing') {
+              e.currentTarget.style.color = 'var(--text-dim)'
+            }
+          }}
+        >
+          <RefreshCw
+            size={14}
+            className="flex-shrink-0"
+            style={{
+              animation: update.status === 'running' ? 'spin 1s linear infinite' : 'none',
+            }}
+          />
+          <span
+            className="text-sm font-medium whitespace-nowrap overflow-hidden"
+            style={{
+              opacity: expanded ? 1 : 0,
+              transition: 'opacity 0.15s ease',
+              fontSize: 12,
+            }}
+          >
+            {updateLabel()}
+          </span>
+        </button>
+
+        {/* Re-import */}
         <button
           onClick={() => navigate('/upload')}
           className="flex items-center w-full transition-colors"

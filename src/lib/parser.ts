@@ -80,6 +80,15 @@ export async function parseLetterboxdZip(file: File): Promise<ParseResult> {
     }
   }
 
+  // Watchlist fallback: name+year → date
+  const watchlistKeyMap = new Map<string, string>()
+  for (const w of watchlist) {
+    if (w.Name && w.Year) {
+      const key = `${w.Name.trim()}|||${parseInt(w.Year) || 0}`
+      if (!watchlistKeyMap.has(key)) watchlistKeyMap.set(key, w.Date)
+    }
+  }
+
   const filmMap = new Map<string, Film>()
 
   // Process watched.csv — primary source of truth
@@ -89,6 +98,8 @@ export async function parseLetterboxdZip(file: File): Promise<ParseResult> {
     const ratingData =
       ratingsMap.get(uri) ??
       ratingsKeyMap.get(`${w.Name?.trim()}|||${parseInt(w.Year) || 0}`)
+    const wlNameKey = `${w.Name?.trim()}|||${parseInt(w.Year) || 0}`
+    const watchlistDate = watchlistMap.get(uri) ?? watchlistKeyMap.get(wlNameKey)
     filmMap.set(uri, {
       uri,
       title: w.Name,
@@ -97,8 +108,8 @@ export async function parseLetterboxdZip(file: File): Promise<ParseResult> {
       rating: ratingData?.rating,
       ratingDate: ratingData?.date,
       diaryEntries: [],
-      onWatchlist: watchlistMap.has(uri),
-      watchlistDate: watchlistMap.get(uri),
+      onWatchlist: watchlistDate != null,
+      watchlistDate,
       releaseToWatchGapDays: undefined,
       enriched: false,
     })
@@ -134,6 +145,8 @@ export async function parseLetterboxdZip(file: File): Promise<ParseResult> {
       const ratingData =
         ratingsMap.get(uri) ??
         ratingsKeyMap.get(key)
+      const wlKeyDiary = `${d.Name?.trim()}|||${parseInt(d.Year) || 0}`
+      const wlDateDiary = watchlistMap.get(uri) ?? watchlistKeyMap.get(wlKeyDiary)
       filmMap.set(uri, {
         uri,
         title: d.Name,
@@ -142,8 +155,8 @@ export async function parseLetterboxdZip(file: File): Promise<ParseResult> {
         rating: ratingData?.rating,
         ratingDate: ratingData?.date,
         diaryEntries: [entry],
-        onWatchlist: watchlistMap.has(uri),
-        watchlistDate: watchlistMap.get(uri),
+        onWatchlist: wlDateDiary != null,
+        watchlistDate: wlDateDiary,
         releaseToWatchGapDays: undefined,
         enriched: false,
       })

@@ -1,20 +1,48 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UploadCloud } from 'lucide-react'
 import { parseLetterboxdZip } from '../lib/parser'
 import { enrichAllFilms } from '../lib/tmdb'
 import { db, upsertFilms } from '../db'
 import { useAppStore } from '../store'
+import Logo from '../components/ui/Logo'
+
+const QUOTES = [
+  { text: 'Cinema is a mirror by which we often see ourselves.', author: 'Martin Scorsese' },
+  { text: 'A film is never really good unless the camera is an eye in the head of a poet.', author: 'Orson Welles' },
+  { text: 'The cinema is not a craft. It is an art.', author: 'Jean-Luc Godard' },
+  { text: 'Every film should have its own world.', author: 'Stanley Kubrick' },
+  { text: "Cinema is a matter of what's in the frame and what's out.", author: 'Martin Scorsese' },
+  { text: "Making a film is like going down a mine — once you've gone down you are completely in the dark.", author: 'John Boorman' },
+]
 
 export default function UploadPage() {
   const navigate = useNavigate()
   const fileRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+  const [quoteIndex, setQuoteIndex] = useState(0)
+  const [quoteVisible, setQuoteVisible] = useState(true)
+  const [posterPaths, setPosterPaths] = useState<(string | null)[]>([])
   const {
     importStatus, importError, enrichmentProgress,
     setImportStatus, setImportError, setEnrichmentProgress,
     setProfile, setTotalFilms,
   } = useAppStore()
+
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>
+    const intervalId = setInterval(() => {
+      setQuoteVisible(false)
+      timeoutId = setTimeout(() => {
+        setQuoteIndex(i => (i + 1) % QUOTES.length)
+        setQuoteVisible(true)
+      }, 500)
+    }, 8000)
+    return () => {
+      clearInterval(intervalId)
+      clearTimeout(timeoutId)
+    }
+  }, [])
 
   async function handleFile(file: File) {
     if (!file.name.endsWith('.zip')) {
@@ -65,19 +93,28 @@ export default function UploadPage() {
       if (newFilms.length === 0) {
         setEnrichmentProgress({ status: 'done', total: 0, completed: 0, failed: 0 })
         setImportStatus('done')
+        await new Promise(resolve => setTimeout(resolve, 1000))
         navigate('/overview')
         return
       }
 
       setImportStatus('enriching')
       setEnrichmentProgress({ status: 'running', total: newFilms.length, completed: 0, failed: 0 })
+      setPosterPaths([])
 
-      await enrichAllFilms(newFilms, (completed, total, failed) => {
+      await enrichAllFilms(newFilms, (completed, total, failed, batchFilms) => {
         setEnrichmentProgress({ completed, total, failed })
+        if (batchFilms) {
+          setPosterPaths(prev => [
+            ...prev,
+            ...batchFilms.map(f => f.tmdbData?.posterPath ?? null),
+          ])
+        }
       })
 
       setEnrichmentProgress({ status: 'done' })
       setImportStatus('done')
+      await new Promise(resolve => setTimeout(resolve, 1000))
       navigate('/overview')
 
     } catch (err) {
@@ -94,29 +131,38 @@ export default function UploadPage() {
   }
 
   const isRunning = importStatus === 'parsing' || importStatus === 'saving' || importStatus === 'enriching'
+  const showLoading = isRunning || importStatus === 'done'
   const { completed, total, failed } = enrichmentProgress
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0
+
+  const stepLabel = (): string => {
+    if (importStatus === 'parsing') return 'parsing your export'
+    if (importStatus === 'saving') return 'saving to library'
+    if (importStatus === 'enriching') return 'enriching with tmdb'
+    if (importStatus === 'done') return 'all done'
+    return ''
+  }
 
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center p-6"
       style={{ backgroundColor: 'var(--bg)' }}
     >
-      {/* Logo */}
-      <div className="mb-12 text-center">
-        <h1
-          className="font-display font-semibold tracking-tight"
-          style={{ fontSize: 32, color: 'var(--text-primary)' }}
-        >
-          Cinestamp
-        </h1>
-        <p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
-          understand your taste
-        </p>
-      </div>
-
-      {!isRunning && importStatus !== 'done' && (
+      {/* Upload form */}
+      {!showLoading && (
         <>
+          <div className="mb-12 text-center">
+            <h1
+              className="font-display font-semibold tracking-tight"
+              style={{ fontSize: 32, color: 'var(--text-primary)' }}
+            >
+              Cinestamp
+            </h1>
+            <p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              understand your taste
+            </p>
+          </div>
+
           <div
             onClick={() => fileRef.current?.click()}
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
@@ -168,62 +214,156 @@ export default function UploadPage() {
         </>
       )}
 
-      {isRunning && (
-        <div className="w-full max-w-md">
-          <div
-            className="p-6"
+      {/* Cinematic loading experience */}
+      {showLoading && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'var(--bg)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '3rem 1.5rem',
+            overflowY: 'auto',
+          }}
+        >
+          <Logo size="lg" />
+
+          <p
             style={{
-              backgroundColor: 'var(--surface)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--border)',
+              fontFamily: 'Clash Display, sans-serif',
+              fontSize: 20,
+              fontWeight: 500,
+              color: 'var(--text-primary)',
+              marginTop: 32,
+              marginBottom: 0,
+              letterSpacing: '-0.01em',
             }}
           >
-            <div className="flex items-center gap-3 mb-5">
-              <div
-                className="w-2 h-2 rounded-full animate-pulse flex-shrink-0"
-                style={{ backgroundColor: 'var(--accent)' }}
-              />
-              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                {importStatus === 'parsing' && 'Reading your export...'}
-                {importStatus === 'saving' && 'Saving to local storage...'}
-                {importStatus === 'enriching' && (
-                  total === 0 ? 'Finishing up...' : `Fetching film data — ${pct}%`
-                )}
-              </span>
-            </div>
+            {stepLabel()}
+          </p>
 
-            {importStatus === 'enriching' && total > 0 && (
-              <>
-                <div
-                  className="w-full"
-                  style={{
-                    backgroundColor: 'var(--surface-raised)',
-                    borderRadius: 'var(--radius-sm)',
-                    height: 6,
-                    marginBottom: 8,
-                  }}
-                >
+          {/* Poster grid — enriching step only */}
+          {importStatus === 'enriching' && (
+            <div
+              style={{
+                marginTop: 28,
+                width: '100%',
+                maxWidth: 600,
+              }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))',
+                  gap: 8,
+                  maxHeight: 256,
+                  overflowY: 'hidden',
+                }}
+              >
+                {posterPaths.map((path, i) =>
+                  path ? (
+                    <img
+                      key={i}
+                      src={`https://image.tmdb.org/t/p/w154${path}`}
+                      alt=""
+                      style={{
+                        width: '100%',
+                        aspectRatio: '2/3',
+                        objectFit: 'cover',
+                        borderRadius: 'var(--radius-sm)',
+                        display: 'block',
+                        animation: 'fadeIn 200ms ease forwards',
+                      }}
+                    />
+                  ) : (
+                    <div
+                      key={i}
+                      style={{
+                        width: '100%',
+                        aspectRatio: '2/3',
+                        backgroundColor: 'var(--surface)',
+                        borderRadius: 'var(--radius-sm)',
+                        animation: 'fadeIn 200ms ease forwards',
+                      }}
+                    />
+                  )
+                )}
+              </div>
+
+              {total > 0 && (
+                <div style={{ marginTop: 16 }}>
                   <div
                     style={{
-                      width: `${pct}%`,
-                      backgroundColor: 'var(--accent)',
-                      borderRadius: 'var(--radius-sm)',
-                      height: 6,
-                      transition: 'width 0.3s ease',
+                      height: 2,
+                      backgroundColor: 'var(--surface-raised)',
+                      borderRadius: 1,
+                      overflow: 'hidden',
+                      width: '100%',
                     }}
-                  />
+                  >
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${pct}%`,
+                        backgroundColor: 'var(--accent)',
+                        transition: 'width 0.3s ease',
+                        borderRadius: 1,
+                      }}
+                    />
+                  </div>
+                  <p
+                    style={{
+                      fontFamily: 'JetBrains Mono, monospace',
+                      fontSize: 13,
+                      color: 'var(--text-dim)',
+                      marginTop: 8,
+                      textAlign: 'center',
+                    }}
+                  >
+                    {completed} / {total} films{failed > 0 ? ` · ${failed} not found` : ''}
+                  </p>
                 </div>
-                <div className="flex justify-between text-xs font-mono">
-                  <span style={{ color: 'var(--text-dim)' }}>{completed} / {total} films</span>
-                  {failed > 0 && (
-                    <span style={{ color: 'var(--text-secondary)' }}>{failed} not found</span>
-                  )}
-                </div>
-                <p className="mt-4 text-xs" style={{ color: 'var(--text-dim)' }}>
-                  This takes a few minutes — TMDB rate-limits at 35 films per 10s.
-                </p>
-              </>
-            )}
+              )}
+            </div>
+          )}
+
+          {/* Cycling cinephile quotes */}
+          <div
+            style={{
+              maxWidth: 480,
+              marginTop: 48,
+              textAlign: 'center',
+              opacity: quoteVisible ? 1 : 0,
+              transition: 'opacity 0.5s ease',
+            }}
+          >
+            <p
+              style={{
+                fontFamily: 'Inter, sans-serif',
+                fontSize: 14,
+                fontStyle: 'italic',
+                color: 'var(--text-dim)',
+                lineHeight: 1.65,
+                margin: 0,
+              }}
+            >
+              "{QUOTES[quoteIndex].text}"
+            </p>
+            <p
+              style={{
+                fontFamily: 'Inter, sans-serif',
+                fontSize: 12,
+                color: 'var(--text-dim)',
+                opacity: 0.6,
+                marginTop: 10,
+                marginBottom: 0,
+              }}
+            >
+              — {QUOTES[quoteIndex].author}
+            </p>
           </div>
         </div>
       )}

@@ -23,6 +23,33 @@ function avgRating(films: Film[]): number | undefined {
   return rated.reduce((sum, f) => sum + f.rating!, 0) / rated.length
 }
 
+// ─── Film type filter ─────────────────────────────────────────────────────────
+
+export function filterFilmsByType(films: Film[], filter: string[]): Film[] {
+  if (filter.includes('All') || filter.length === 0) return films
+
+  const isMiniseries = (f: Film) =>
+    (f.tmdbData?.status?.toLowerCase().includes('series') ?? false) ||
+    f.tmdbData?.runtime === 0
+
+  const isShort = (f: Film) => {
+    const r = f.tmdbData?.runtime
+    return r != null && r > 0 && r < 40 && !isMiniseries(f)
+  }
+
+  const isFeature = (f: Film) => {
+    const r = f.tmdbData?.runtime
+    return r != null && r >= 40 && !isMiniseries(f)
+  }
+
+  return films.filter(f => {
+    if (filter.includes('Miniseries') && isMiniseries(f)) return true
+    if (filter.includes('Shorts') && isShort(f)) return true
+    if (filter.includes('Features') && isFeature(f)) return true
+    return false
+  })
+}
+
 // ─── All films (cached load) ──────────────────────────────────────────────────
 
 export async function getAllFilms(): Promise<Film[]> {
@@ -216,7 +243,9 @@ const LANGUAGE_NAMES: Record<string, string> = {
   }
   
   export function languageName(code: string): string {
-    return LANGUAGE_NAMES[code] ?? code
+    const name = LANGUAGE_NAMES[code]
+    if (!name && import.meta.env.DEV) console.warn(`[cinestamp] Unmapped language code: ${code}`)
+    return name ?? code
   }
 
   export async function languageStats(): Promise<AttributeStat[]> {
@@ -242,6 +271,7 @@ export async function countryStats(): Promise<CountryStat[]> {
   const map = new Map<string, number>()
   for (const f of films) {
     for (const c of f.tmdbData?.productionCountries ?? []) {
+      if (c === 'Antarctica') continue
       map.set(c, (map.get(c) || 0) + 1)
     }
   }

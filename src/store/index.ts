@@ -13,12 +13,16 @@ interface AppStore {
   profile: UserProfile | null
   totalFilms: number
 
+  // Global filters
+  filmTypeFilter: string[]
+
   // Actions
   setImportStatus: (status: ImportStatus) => void
   setImportError: (err: string | null) => void
   setEnrichmentProgress: (p: Partial<EnrichmentProgress>) => void
   setProfile: (profile: UserProfile | null) => void
   setTotalFilms: (n: number) => void
+  setFilmTypeFilter: (filter: string[]) => void
   reset: () => void
 }
 
@@ -35,6 +39,7 @@ export const useAppStore = create<AppStore>((set) => ({
   enrichmentProgress: initialProgress,
   profile: null,
   totalFilms: 0,
+  filmTypeFilter: ['All'],
 
   setImportStatus: (status) => set({ importStatus: status }),
   setImportError: (err) => set({ importError: err }),
@@ -44,6 +49,7 @@ export const useAppStore = create<AppStore>((set) => ({
     })),
   setProfile: (profile) => set({ profile }),
   setTotalFilms: (n) => set({ totalFilms: n }),
+  setFilmTypeFilter: (filter) => set({ filmTypeFilter: filter }),
   reset: () =>
     set({
       importStatus: 'idle',

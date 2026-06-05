@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Film as FilmIcon, Clock, Globe, Star, Flame } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useAppStore } from '../store'
 import {
   ratingDistribution,
@@ -9,6 +11,13 @@ import {
   getAllFilms,
 } from '../lib/stats'
 import type { RatingBucket, Film } from '../types'
+
+// ─── Star label map ───────────────────────────────────────────────────────────
+
+const STAR_LABELS: Record<number, string> = {
+  0.5: '½★', 1: '1★', 1.5: '1½★', 2: '2★', 2.5: '2½★',
+  3: '3★', 3.5: '3½★', 4: '4★', 4.5: '4½★', 5: '5★',
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -39,7 +48,6 @@ function computeCurrentStreak(films: Film[]): number {
   today.setHours(0, 0, 0, 0)
   const cursor = new Date(today)
 
-  // If today has no entry, check if yesterday starts the streak
   if (!days.has(cursor.toISOString().slice(0, 10))) {
     cursor.setDate(cursor.getDate() - 1)
   }
@@ -57,7 +65,7 @@ function formatDate(dateStr: string): string {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatCard({ value, label }: { value: string; label: string }) {
+function StatCard({ value, label, icon: Icon }: { value: string; label: string; icon: LucideIcon }) {
   return (
     <div
       style={{
@@ -68,6 +76,7 @@ function StatCard({ value, label }: { value: string; label: string }) {
         minWidth: 0,
       }}
     >
+      <Icon size={16} style={{ color: 'var(--text-dim)', marginBottom: 6, display: 'block' }} />
       <div
         style={{
           fontFamily: 'JetBrains Mono, monospace',
@@ -122,6 +131,11 @@ interface RecentEntry {
   rating?: number
 }
 
+interface RewatchGroup {
+  films: { film: Film; count: number }[]
+  count: number
+}
+
 export default function OverviewPage() {
   const { profile, totalFilms } = useAppStore()
 
@@ -133,8 +147,9 @@ export default function OverviewPage() {
   const [avgRating, setAvgRating] = useState('—')
   const [recentEntries, setRecentEntries] = useState<RecentEntry[]>([])
   const [streak, setStreak] = useState(0)
-  const [topRewatch, setTopRewatch] = useState<{ title: string; count: number } | null>(null)
+  const [topRewatch, setTopRewatch] = useState<RewatchGroup | null>(null)
   const [loading, setLoading] = useState(true)
+  const [backdropFilms, setBackdropFilms] = useState<Film[]>([])
 
   useEffect(() => {
     async function load() {
@@ -152,10 +167,12 @@ export default function OverviewPage() {
       setTopDirector(directors[0]?.name ?? null)
       setUniqueCountries(ctry.length)
 
-      if (rewatched[0]) {
+      if (rewatched.length > 0) {
+        const maxCount = rewatched[0].rewatchCount
+        const tied = rewatched.filter(r => r.rewatchCount === maxCount)
         setTopRewatch({
-          title: rewatched[0].film.title,
-          count: rewatched[0].rewatchCount,
+          films: tied.map(r => ({ film: r.film, count: r.rewatchCount })),
+          count: maxCount,
         })
       }
 
@@ -181,6 +198,25 @@ export default function OverviewPage() {
         .slice(0, 5)
       setRecentEntries(entries)
       setLoading(false)
+
+      // Build backdrop from favorite films in profile, fall back to highest-rated
+      const favUris = profile?.favoriteFilmUris ?? []
+      const candidates: Film[] = []
+      const usedUris = new Set<string>()
+      for (const uri of favUris.slice(0, 4)) {
+        const film = allFilms.find(f => f.uri === uri && f.tmdbData?.backdropPath)
+        if (film && !usedUris.has(film.uri)) { candidates.push(film); usedUris.add(film.uri) }
+      }
+      if (candidates.length < 4) {
+        const fallbacks = allFilms
+          .filter(f => f.rating != null && f.rating >= 4.5 && f.tmdbData?.backdropPath && !usedUris.has(f.uri) && f.diaryEntries.length === 1)
+          .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+        for (const f of fallbacks) {
+          if (candidates.length >= 4) break
+          candidates.push(f); usedUris.add(f.uri)
+        }
+      }
+      setBackdropFilms(candidates.slice(0, 4))
     }
     load()
   }, [])
@@ -192,12 +228,12 @@ export default function OverviewPage() {
 
   const username = profile?.username
 
-  const heroStats = [
-    { label: 'films watched', value: totalFilms > 0 ? totalFilms.toLocaleString() : '—' },
-    { label: watchTime?.unit ?? 'hours', value: watchTime?.value ?? '—' },
-    { label: 'countries', value: uniqueCountries > 0 ? uniqueCountries.toLocaleString() : '—' },
-    { label: 'avg rating', value: avgRating },
-    { label: streak === 1 ? 'day streak' : 'day streak', value: streak > 0 ? streak.toLocaleString() : '—' },
+  const heroStats: { label: string; value: string; icon: LucideIcon }[] = [
+    { label: 'films watched', value: totalFilms > 0 ? totalFilms.toLocaleString() : '—', icon: FilmIcon },
+    { label: watchTime?.unit ?? 'hours', value: watchTime?.value ?? '—', icon: Clock },
+    { label: 'countries', value: uniqueCountries > 0 ? uniqueCountries.toLocaleString() : '—', icon: Globe },
+    { label: 'avg rating', value: avgRating, icon: Star },
+    { label: 'day streak', value: streak > 0 ? streak.toLocaleString() : '—', icon: Flame },
   ]
 
   if (loading) {
@@ -211,7 +247,33 @@ export default function OverviewPage() {
   }
 
   return (
-    <div style={{ padding: '24px 24px 40px', maxWidth: 960 }}>
+    <div>
+      {/* Backdrop strip — full bleed */}
+      {backdropFilms.length > 0 && (
+        <div style={{ display: 'flex', height: 200, overflow: 'hidden' }}>
+          {backdropFilms.map(film => (
+            <div
+              key={film.uri}
+              style={{
+                flex: 1,
+                backgroundImage: `url(https://image.tmdb.org/t/p/w780${film.tmdbData!.backdropPath})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                position: 'relative',
+              }}
+            >
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.05), rgba(0,0,0,0.65))' }} />
+              <div style={{ position: 'absolute', bottom: 8, left: 8, right: 8 }}>
+                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.65)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'Inter, sans-serif' }}>
+                  {film.title}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Main content */}
+      <div style={{ padding: '24px 24px 40px', maxWidth: 960 }}>
       {/* Greeting */}
       <h1
         style={{
@@ -235,7 +297,7 @@ export default function OverviewPage() {
         }}
       >
         {heroStats.map(s => (
-          <StatCard key={s.label} value={s.value} label={s.label} />
+          <StatCard key={s.label} value={s.value} label={s.label} icon={s.icon} />
         ))}
       </div>
 
@@ -275,32 +337,16 @@ export default function OverviewPage() {
                   borderBottom: i === recentEntries.length - 1 ? 'none' : '1px solid var(--border)',
                 }}
               >
-                {/* Poster */}
                 {e.film.tmdbData?.posterPath ? (
                   <img
                     src={`https://image.tmdb.org/t/p/w92${e.film.tmdbData.posterPath}`}
                     alt=""
-                    style={{
-                      width: 30,
-                      height: 45,
-                      objectFit: 'cover',
-                      borderRadius: 3,
-                      flexShrink: 0,
-                    }}
+                    style={{ width: 30, height: 45, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }}
                   />
                 ) : (
-                  <div
-                    style={{
-                      width: 30,
-                      height: 45,
-                      borderRadius: 3,
-                      backgroundColor: 'var(--surface-raised)',
-                      flexShrink: 0,
-                    }}
-                  />
+                  <div style={{ width: 30, height: 45, borderRadius: 3, backgroundColor: 'var(--surface-raised)', flexShrink: 0 }} />
                 )}
 
-                {/* Title + year */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
@@ -319,16 +365,9 @@ export default function OverviewPage() {
                   </div>
                 </div>
 
-                {/* Rating + date */}
                 <div style={{ flexShrink: 0, textAlign: 'right' }}>
                   {e.rating != null && (
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontFamily: 'JetBrains Mono, monospace',
-                        color: 'var(--accent)',
-                      }}
-                    >
+                    <div style={{ fontSize: 12, fontFamily: 'JetBrains Mono, monospace', color: 'var(--accent)' }}>
                       {e.rating.toFixed(1)}★
                     </div>
                   )}
@@ -341,7 +380,7 @@ export default function OverviewPage() {
           )}
         </div>
 
-        {/* Rating distribution */}
+        {/* Rating distribution — vertical histogram */}
         <div
           style={{
             backgroundColor: 'var(--surface)',
@@ -354,64 +393,62 @@ export default function OverviewPage() {
           {ratingDist.filter(d => d.count > 0).length === 0 ? (
             <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>No ratings yet.</p>
           ) : (
-            <div>
-              {[...ratingDist].reverse().map(d => (
-                <div
-                  key={d.rating}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    marginBottom: 7,
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 30,
-                      flexShrink: 0,
-                      textAlign: 'right',
-                      fontSize: 11,
-                      fontFamily: 'JetBrains Mono, monospace',
-                      color: 'var(--text-dim)',
-                    }}
-                  >
-                    {d.rating}
-                  </span>
+            <>
+              {/* Bars */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  gap: 4,
+                  height: 110,
+                }}
+              >
+                {ratingDist.map(d => (
                   <div
+                    key={d.rating}
                     style={{
                       flex: 1,
-                      height: 5,
-                      backgroundColor: 'var(--surface-raised)',
-                      borderRadius: 3,
-                      overflow: 'hidden',
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'flex-end',
                     }}
                   >
                     <div
                       style={{
-                        width: `${(d.count / maxRatingCount) * 100}%`,
-                        height: '100%',
+                        width: '100%',
+                        height: `${(d.count / maxRatingCount) * 100}%`,
                         backgroundColor: 'var(--accent)',
-                        borderRadius: 3,
-                        opacity: 0.7 + (d.count / maxRatingCount) * 0.3,
-                        transition: 'width 0.4s ease',
+                        borderRadius: '2px 2px 0 0',
+                        opacity: d.count > 0 ? 0.55 + (d.count / maxRatingCount) * 0.45 : 0,
+                        transition: 'height 0.4s ease',
+                        minHeight: d.count > 0 ? 2 : 0,
                       }}
                     />
                   </div>
-                  <span
+                ))}
+              </div>
+
+              {/* X-axis labels */}
+              <div style={{ display: 'flex', gap: 4, marginTop: 5 }}>
+                {ratingDist.map(d => (
+                  <div
+                    key={d.rating}
                     style={{
-                      width: 32,
-                      flexShrink: 0,
-                      textAlign: 'right',
-                      fontSize: 11,
+                      flex: 1,
+                      textAlign: 'center',
+                      fontSize: 9,
                       fontFamily: 'JetBrains Mono, monospace',
                       color: 'var(--text-dim)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
                     }}
                   >
-                    {d.count > 0 ? d.count : ''}
-                  </span>
-                </div>
-              ))}
-            </div>
+                    {STAR_LABELS[d.rating] ?? d.rating}
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -426,25 +463,59 @@ export default function OverviewPage() {
       >
         <HighlightCard label="directors you keep coming back to" value={topDirector ?? '—'} />
         <HighlightCard label="top genre" value={topGenre ?? '—'} />
-        <HighlightCard
-          label="most rewatched"
-          value={topRewatch ? topRewatch.title : '—'}
-          sub={topRewatch ? `${topRewatch.count} watches` : undefined}
-        />
+
+        {/* Most rewatched — horizontal scrollable row when tied */}
+        <div
+          style={{
+            backgroundColor: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)',
+            padding: '14px 16px',
+          }}
+        >
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'lowercase' }}>
+            {topRewatch ? `most rewatched · ${topRewatch.count} watches` : 'most rewatched'}
+          </div>
+          {topRewatch ? (
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+              {topRewatch.films.map(({ film }) => (
+                <div key={film.uri} style={{ flexShrink: 0, width: 45 }}>
+                  {film.tmdbData?.posterPath ? (
+                    <img
+                      src={`https://image.tmdb.org/t/p/w92${film.tmdbData.posterPath}`}
+                      alt=""
+                      style={{ width: 45, height: 67, objectFit: 'cover', borderRadius: 3, display: 'block' }}
+                    />
+                  ) : (
+                    <div style={{ width: 45, height: 67, backgroundColor: 'var(--surface-raised)', borderRadius: 3 }} />
+                  )}
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: 'var(--text-primary)',
+                      marginTop: 3,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: 45,
+                    }}
+                  >
+                    {film.title}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)' }}>—</div>
+          )}
+        </div>
+      </div>
       </div>
     </div>
   )
 }
 
-function HighlightCard({
-  label,
-  value,
-  sub,
-}: {
-  label: string
-  value: string
-  sub?: string
-}) {
+function HighlightCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div
       style={{
@@ -454,14 +525,7 @@ function HighlightCard({
         padding: '14px 16px',
       }}
     >
-      <div
-        style={{
-          fontSize: 11,
-          color: 'var(--text-dim)',
-          marginBottom: 6,
-          textTransform: 'lowercase',
-        }}
-      >
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 6, textTransform: 'lowercase' }}>
         {label}
       </div>
       <div
@@ -477,14 +541,7 @@ function HighlightCard({
         {value}
       </div>
       {sub && (
-        <div
-          style={{
-            fontSize: 11,
-            fontFamily: 'JetBrains Mono, monospace',
-            color: 'var(--text-dim)',
-            marginTop: 2,
-          }}
-        >
+        <div style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-dim)', marginTop: 2 }}>
           {sub}
         </div>
       )}

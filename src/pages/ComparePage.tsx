@@ -4,11 +4,12 @@ import type { Film } from '../types'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type PeriodMode = 'past7' | 'past30' | 'past90' | 'year' | 'custom' | 'alltime'
+type PeriodMode = 'past7' | 'past30' | 'past90' | 'year' | 'month' | 'custom' | 'alltime'
 
 interface PeriodConfig {
   mode: PeriodMode
   year?: number
+  month?: number
   startDate?: string
   endDate?: string
 }
@@ -33,6 +34,11 @@ function periodLabel(config: PeriodConfig): string {
     case 'past30': return 'Past 30 days'
     case 'past90': return 'Past 90 days'
     case 'year': return String(config.year ?? new Date().getFullYear())
+    case 'month': {
+      const y = config.year ?? new Date().getFullYear()
+      const m = config.month ?? new Date().getMonth()
+      return new Date(y, m, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+    }
     case 'custom': return config.startDate && config.endDate
       ? `${config.startDate} → ${config.endDate}`
       : 'Custom range'
@@ -64,6 +70,11 @@ function periodRange(config: PeriodConfig): [Date, Date] {
     case 'year': {
       const y = config.year ?? today.getFullYear()
       return [new Date(y, 0, 1, 0, 0, 0), new Date(y, 11, 31, 23, 59, 59)]
+    }
+    case 'month': {
+      const y = config.year ?? today.getFullYear()
+      const m = config.month ?? today.getMonth()
+      return [new Date(y, m, 1, 0, 0, 0), new Date(y, m + 1, 0, 23, 59, 59)]
     }
     case 'custom': {
       const s = config.startDate ? new Date(config.startDate + 'T00:00:00') : new Date(0)
@@ -146,6 +157,7 @@ const MODES: { key: PeriodMode; label: string }[] = [
   { key: 'past30', label: '30 days' },
   { key: 'past90', label: '90 days' },
   { key: 'year', label: 'Year' },
+  { key: 'month', label: 'Month' },
   { key: 'custom', label: 'Custom' },
   { key: 'alltime', label: 'All time' },
 ]
@@ -209,6 +221,27 @@ function PeriodSelector({
             <option key={y} value={y}>{y}</option>
           ))}
         </select>
+      )}
+
+      {config.mode === 'month' && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <select
+            value={config.year ?? years[0] ?? new Date().getFullYear()}
+            onChange={e => onChange({ ...config, year: Number(e.target.value) })}
+            style={{ padding: '5px 10px', backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer' }}
+          >
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <select
+            value={config.month ?? new Date().getMonth()}
+            onChange={e => onChange({ ...config, month: Number(e.target.value) })}
+            style={{ padding: '5px 10px', backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: 13, cursor: 'pointer' }}
+          >
+            {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m, i) => (
+              <option key={i} value={i}>{m}</option>
+            ))}
+          </select>
+        </div>
       )}
 
       {config.mode === 'custom' && (

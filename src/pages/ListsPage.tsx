@@ -5,7 +5,6 @@ import oscarData from '../lib/lists/oscar-best-picture'
 import cannesData from '../lib/lists/cannes-palme-dor'
 import imdb250Data from '../lib/lists/imdb-top-250'
 import type { AwardEntry } from '../lib/lists/oscar-best-picture'
-import type { ImdbEntry } from '../lib/lists/imdb-top-250'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -332,8 +331,10 @@ function CollectionCard({
   detail: CollectionDetail | undefined
   allTmdbIds: Set<number>
 }) {
-  const totalFromTmdb = detail?.parts.length
-  const missing = detail ? detail.parts.filter(p => !allTmdbIds.has(p.id)) : []
+  const today = new Date().toISOString().slice(0, 10)
+  const releasedParts = (detail?.parts ?? []).filter(p => p.release_date && p.release_date <= today)
+  const totalFromTmdb = detail ? releasedParts.length : undefined
+  const missing = releasedParts.filter(p => !allTmdbIds.has(p.id))
 
   return (
     <div
@@ -348,7 +349,7 @@ function CollectionCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
         <CompletionRing
           seen={collection.seenFilms.length}
-          total={totalFromTmdb ?? collection.seenFilms.length}
+          total={totalFromTmdb != null ? totalFromTmdb : collection.seenFilms.length}
         />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -367,6 +368,12 @@ function CollectionCard({
           <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 3 }}>
             {collection.seenFilms.length} seen
             {totalFromTmdb != null && ` of ${totalFromTmdb}`}
+            {(() => {
+              const rated = collection.seenFilms.filter(f => f.rating != null)
+              if (rated.length === 0) return null
+              const avg = rated.reduce((s, f) => s + f.rating!, 0) / rated.length
+              return <span style={{ marginLeft: 8, fontFamily: 'JetBrains Mono, monospace', color: 'var(--accent)' }}>{avg.toFixed(1)}★</span>
+            })()}
           </div>
         </div>
       </div>
@@ -511,6 +518,8 @@ function CollectionsTab({
   allTmdbIds: Set<number>
 }) {
   const [details, setDetails] = useState<Map<number, CollectionDetail>>(new Map())
+  const [search, setSearch] = useState('')
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set(['inprogress']))
 
   useEffect(() => {
     if (collections.length === 0) return
@@ -521,13 +530,22 @@ function CollectionsTab({
       fetch(`https://api.themoviedb.org/3/collection/${col.id}?language=en-US`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-        .then(r => r.json())
-        .then((data: CollectionDetail) => {
-          setDetails(prev => new Map([...prev, [col.id, data]]))
+        .then(r => { if (!r.ok) return; return r.json() })
+        .then((data) => {
+          if (!data || !Array.isArray(data.parts)) return
+          setDetails(prev => new Map([...prev, [col.id, data as CollectionDetail]]))
         })
         .catch(() => {})
     }
   }, [collections])
+
+  function toggleGroup(g: string) {
+    setOpenGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(g)) next.delete(g); else next.add(g)
+      return next
+    })
+  }
 
   if (collections.length === 0) {
     return (
@@ -537,99 +555,80 @@ function CollectionsTab({
     )
   }
 
+  const today = new Date().toISOString().slice(0, 10)
+  const filtered = search.trim()
+    ? collections.filter(c => c.name.toLowerCase().includes(search.trim().toLowerCase()))
+    : collections
+
+  function getPct(col: Collection): number {
+    const detail = details.get(col.id)
+    if (!detail) return col.seenFilms.length > 0 ? 0.5 : 0 // unknown — treat as in-progress if seen any
+    const released = detail.parts.filter(p => p.release_date && p.release_date <= today)
+    if (released.length === 0) return col.seenFilms.length > 0 ? 1 : 0
+    return col.seenFilms.length / released.length
+  }
+
+  const completed = filtered.filter(c => details.has(c.id) && getPct(c) >= 1)
+  const inProgress = filtered.filter(c => {
+    const pct = getPct(c)
+    return pct > 0 && pct < 1
+  })
+  const notStarted = filtered.filter(c => getPct(c) === 0)
+
+  function GroupSection({ groupKey, title, cols }: { groupKey: string; title: string; cols: Collection[] }) {
+    const isOpen = openGroups.has(groupKey)
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <button
+          onClick={() => toggleGroup(groupKey)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0', marginBottom: isOpen ? 8 : 0, color: 'var(--text-secondary)' }}
+        >
+          <span style={{ fontFamily: 'Clash Display, sans-serif', fontWeight: 600, fontSize: 12, color: 'var(--text-dim)', textTransform: 'uppercase' as const, letterSpacing: '0.08em' }}>{title}</span>
+          <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--text-dim)' }}>{cols.length}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>{isOpen ? '▲' : '▼'}</span>
+        </button>
+        {isOpen && cols.map(col => (
+          <CollectionCard
+            key={col.id}
+            collection={col}
+            detail={details.get(col.id)}
+            allTmdbIds={allTmdbIds}
+          />
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div>
-      {collections.map(col => (
-        <CollectionCard
-          key={col.id}
-          collection={col}
-          detail={details.get(col.id)}
-          allTmdbIds={allTmdbIds}
-        />
-      ))}
+      <input
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        placeholder="Search collections..."
+        style={{
+          width: '100%',
+          padding: '8px 12px',
+          marginBottom: 16,
+          backgroundColor: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)',
+          color: 'var(--text-primary)',
+          fontSize: 13,
+          boxSizing: 'border-box',
+          outline: 'none',
+        }}
+      />
+      {inProgress.length > 0 && <GroupSection groupKey="inprogress" title="In progress" cols={inProgress} />}
+      {completed.length > 0 && <GroupSection groupKey="completed" title="Completed" cols={completed} />}
+      {notStarted.length > 0 && <GroupSection groupKey="notstarted" title="Not started" cols={notStarted} />}
+      {filtered.length === 0 && (
+        <div style={{ padding: '24px 0', color: 'var(--text-dim)', fontSize: 13 }}>No collections match.</div>
+      )}
     </div>
   )
 }
 
 // ─── Top Lists tab ────────────────────────────────────────────────────────────
-
-function TopListRow({
-  entry,
-  film,
-}: {
-  entry: ImdbEntry
-  film: Film | undefined
-}) {
-  const seen = !!film
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        padding: '8px 0',
-        borderBottom: '1px solid var(--border)',
-        opacity: seen ? 1 : 0.5,
-      }}
-    >
-      <span
-        style={{
-          width: 28,
-          flexShrink: 0,
-          textAlign: 'right',
-          fontSize: 11,
-          fontFamily: 'JetBrains Mono, monospace',
-          color: 'var(--text-dim)',
-        }}
-      >
-        {entry.rank}
-      </span>
-      {film?.tmdbData?.posterPath ? (
-        <img
-          src={`https://image.tmdb.org/t/p/w92${film.tmdbData.posterPath}`}
-          alt=""
-          style={{ width: 24, height: 36, objectFit: 'cover', borderRadius: 2, flexShrink: 0 }}
-        />
-      ) : (
-        <div
-          style={{
-            width: 24,
-            height: 36,
-            backgroundColor: 'var(--surface-raised)',
-            borderRadius: 2,
-            flexShrink: 0,
-          }}
-        />
-      )}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 13,
-            color: seen ? 'var(--text-primary)' : 'var(--text-secondary)',
-            overflow: 'hidden',
-            whiteSpace: 'nowrap',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {entry.title}
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{entry.year}</div>
-      </div>
-      {seen && film.rating != null && (
-        <span
-          style={{
-            flexShrink: 0,
-            fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 12,
-            color: 'var(--accent)',
-          }}
-        >
-          {film.rating.toFixed(1)}★
-        </span>
-      )}
-    </div>
-  )
-}
 
 function TopListsTab({
   byImdb,
@@ -638,85 +637,148 @@ function TopListsTab({
   byImdb: Map<string, Film>
   byTitleYear: Map<string, Film>
 }) {
-  const [showAllUnseen, setShowAllUnseen] = useState(false)
+  const [expandedList, setExpandedList] = useState<string | null>(null)
 
-  const matched = useMemo(
-    () => imdb250Data.map(e => ({ entry: e, film: findMatch(e, byImdb, byTitleYear) })),
+  const imdbMatched = useMemo(
+    () => imdb250Data.map((e, i) => ({ entry: { ...e, rank: e.rank ?? i + 1 }, film: findMatch(e, byImdb, byTitleYear) })),
     [byImdb, byTitleYear]
   )
 
-  const seen = matched.filter(m => m.film)
-  const unseen = matched.filter(m => !m.film)
-  const unseenToShow = showAllUnseen ? unseen : unseen.slice(0, 25)
+  const lists = useMemo(() => [
+    {
+      key: 'imdb250',
+      name: 'IMDB Top 250',
+      snapshot: '2025',
+      matched: imdbMatched,
+    },
+  ], [imdbMatched])
 
   return (
     <div>
+      {/* Overview cards grid */}
       <div
         style={{
-          backgroundColor: 'var(--surface)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-lg)',
-          padding: '20px',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+          gap: 12,
+          marginBottom: 20,
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            justifyContent: 'space-between',
-            marginBottom: 12,
-          }}
-        >
-          <h3
+        {lists.map(list => {
+          const seen = list.matched.filter(m => m.film).length
+          const total = list.matched.length
+          const pct = total > 0 ? Math.round((seen / total) * 100) : 0
+          const isExpanded = expandedList === list.key
+          return (
+            <button
+              key={list.key}
+              onClick={() => setExpandedList(isExpanded ? null : list.key)}
+              style={{
+                backgroundColor: isExpanded ? 'var(--accent-dim)' : 'var(--surface)',
+                border: `1px solid ${isExpanded ? 'var(--accent)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius-lg)',
+                padding: '16px 18px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                transition: 'background 0.15s, border 0.15s',
+              }}
+            >
+              <div style={{ fontFamily: 'Clash Display, sans-serif', fontWeight: 600, fontSize: 14, color: 'var(--text-primary)', marginBottom: 10 }}>
+                {list.name}
+              </div>
+              <ProgressBar seen={seen} total={total} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--text-dim)' }}>{seen} / {total}</span>
+                <span style={{
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: 11,
+                  color: pct >= 80 ? 'var(--success)' : pct >= 40 ? 'var(--accent)' : 'var(--text-dim)',
+                  backgroundColor: 'var(--surface-raised)',
+                  padding: '2px 7px',
+                  borderRadius: 'var(--radius-sm)',
+                }}>{pct}%</span>
+              </div>
+              {list.snapshot && <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6 }}>snapshot · {list.snapshot}</div>}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Expanded content */}
+      {lists.map(list => {
+        if (expandedList !== list.key) return null
+        const seen = list.matched.filter(m => m.film)
+        const unseen = list.matched.filter(m => !m.film)
+        const top5Unseen = unseen.slice(0, 5)
+        return (
+          <div
+            key={list.key}
             style={{
-              fontFamily: 'Clash Display, sans-serif',
-              fontWeight: 600,
-              fontSize: 15,
-              color: 'var(--text-primary)',
+              backgroundColor: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '20px',
             }}
           >
-            IMDB Top 250
-          </h3>
-          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>snapshot · 2025</span>
-        </div>
+            {/* 5 to watch next */}
+            {top5Unseen.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <SectionLabel>5 to watch next</SectionLabel>
+                {top5Unseen.map(({ entry }) => (
+                  <div key={entry.imdbId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ width: 28, flexShrink: 0, textAlign: 'right', fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-dim)' }}>{entry.rank}</span>
+                    <div style={{ width: 24, height: 36, backgroundColor: 'var(--surface-raised)', borderRadius: 2, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: 'var(--text-primary)', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{entry.title}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{entry.year}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
-        <ProgressBar seen={seen.length} total={matched.length} />
+            {/* Seen films poster grid */}
+            {seen.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <SectionLabel>seen ({seen.length})</SectionLabel>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {seen.map(({ entry, film }) => (
+                    <div key={entry.imdbId} title={`${entry.title} (${entry.year})`}>
+                      {film?.tmdbData?.posterPath ? (
+                        <img
+                          src={`https://image.tmdb.org/t/p/w92${film.tmdbData.posterPath}`}
+                          alt=""
+                          style={{ width: 50, height: 75, objectFit: 'cover', borderRadius: 3 }}
+                        />
+                      ) : (
+                        <div style={{ width: 50, height: 75, backgroundColor: 'var(--surface-raised)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span style={{ fontSize: 7, color: 'var(--text-dim)', textAlign: 'center', padding: '0 2px' }}>{entry.title.slice(0, 8)}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-        {unseen.length > 0 && (
-          <div style={{ marginTop: 20 }}>
-            <SectionLabel>not yet seen — sorted by rank</SectionLabel>
-            {unseenToShow.map(({ entry, film }) => (
-              <TopListRow key={entry.imdbId} entry={entry} film={film} />
-            ))}
-            {!showAllUnseen && unseen.length > 25 && (
-              <button
-                onClick={() => setShowAllUnseen(true)}
-                style={{
-                  marginTop: 12,
-                  padding: '6px 14px',
-                  fontSize: 12,
-                  color: 'var(--text-secondary)',
-                  backgroundColor: 'var(--surface-raised)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  cursor: 'pointer',
-                }}
-              >
-                show all {unseen.length} unseen
-              </button>
+            {/* All unseen */}
+            {unseen.length > 0 && (
+              <div>
+                <SectionLabel>not yet seen ({unseen.length})</SectionLabel>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {unseen.map(({ entry }) => (
+                    <div key={entry.imdbId} title={`#${entry.rank} ${entry.title} (${entry.year})`}>
+                      <div style={{ width: 50, height: 75, backgroundColor: 'var(--surface-raised)', borderRadius: 3, opacity: 0.4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 7, color: 'var(--text-dim)', textAlign: 'center', padding: '0 2px' }}>{entry.title.slice(0, 8)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
-        )}
-
-        {seen.length > 0 && (
-          <div style={{ marginTop: 20 }}>
-            <SectionLabel>seen ({seen.length})</SectionLabel>
-            {seen.map(({ entry, film }) => (
-              <TopListRow key={entry.imdbId} entry={entry} film={film} />
-            ))}
-          </div>
-        )}
-      </div>
+        )
+      })}
     </div>
   )
 }

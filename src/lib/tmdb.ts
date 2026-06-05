@@ -1,5 +1,5 @@
-import type { Film, TMDBData } from '../types'
-import { db } from '../db'
+import type { Film, TMDBData, CachedPerson } from '../types'
+import { db, getPerson, savePerson } from '../db'
 
 const BASE = 'https://api.themoviedb.org/3'
 const TOKEN = import.meta.env.VITE_TMDB_READ_TOKEN as string
@@ -174,9 +174,140 @@ export async function enrichFilm(film: Film): Promise<Film> {
   }
 }
 
+// ─── Partial re-enrichment (fills in missing fields on already-enriched films) ─
+
+export async function reEnrichMissingFields(
+  onProgress: ProgressCallback,
+  signal?: AbortSignal
+): Promise<void> {
+  const all = await db.films.toArray()
+  // Target: enriched films that have a tmdbId but are missing imdbId in tmdbData
+  const targets = all.filter(
+    (f) =>
+      f.enriched &&
+      !f.enrichError &&
+      f.tmdbId != null &&
+      f.tmdbData != null &&
+      !f.tmdbData.imdbId
+  )
+  const total = targets.length
+  let completed = 0
+  let failed = 0
+
+  if (total === 0) {
+    onProgress(0, 0, 0)
+    return
+  }
+
+  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    if (signal?.aborted) break
+
+    const batch = targets.slice(i, i + BATCH_SIZE)
+
+    const updated = await Promise.all(
+      batch.map(async (film) => {
+        try {
+          const tmdbData = await fetchTMDBDetails(film.tmdbId!)
+          if (!tmdbData) return { ...film, enrichError: true }
+          const releaseToWatchGapDays = computeReleaseToWatchGap(film, tmdbData.tmdbReleaseDate)
+          return { ...film, tmdbData, releaseToWatchGapDays, enrichError: false }
+        } catch {
+          return { ...film, enrichError: true }
+        }
+      })
+    )
+
+    await db.films.bulkPut(updated)
+
+    completed += updated.length
+    failed += updated.filter((f) => f.enrichError).length
+    onProgress(completed, total, failed)
+
+    if (i + BATCH_SIZE < targets.length) {
+      await sleep(BATCH_DELAY_MS)
+    }
+  }
+}
+
+// ─── Person data ─────────────────────────────────────────────────────────────
+
+export interface PersonCredit {
+  tmdbId: number
+  title: string
+  year: number
+  popularity: number
+  posterPath?: string
+  tmdbRating?: number
+}
+
+export async function fetchPersonByName(name: string): Promise<CachedPerson | null> {
+  const cached = await getPerson(name)
+  if (cached) return cached
+
+  try {
+    const searchRes = await fetch(
+      `${BASE}/search/person?query=${encodeURIComponent(name)}&language=en-US`,
+      { headers }
+    )
+    if (!searchRes.ok) return null
+    const searchData = await searchRes.json()
+    const first = searchData.results?.[0]
+    if (!first) return null
+
+    const detailRes = await fetch(`${BASE}/person/${first.id}?language=en-US`, { headers })
+    if (!detailRes.ok) return null
+    const d = await detailRes.json()
+
+    const person: CachedPerson = {
+      tmdbPersonId: d.id as number,
+      name: d.name as string,
+      profilePath: d.profile_path || undefined,
+      biography: d.biography || undefined,
+      birthday: d.birthday || undefined,
+      placeOfBirth: d.place_of_birth || undefined,
+      knownForDepartment: d.known_for_department || undefined,
+      fetchedAt: new Date().toISOString(),
+    }
+
+    await savePerson(person)
+    return person
+  } catch {
+    return null
+  }
+}
+
+export async function fetchPersonMovieCredits(tmdbPersonId: number): Promise<PersonCredit[]> {
+  try {
+    const res = await fetch(
+      `${BASE}/person/${tmdbPersonId}/movie_credits?language=en-US`,
+      { headers }
+    )
+    if (!res.ok) return []
+    const data = await res.json()
+
+    const seen = new Set<number>()
+    const credits: PersonCredit[] = []
+    for (const m of [...(data.cast ?? []), ...(data.crew ?? [])]) {
+      if (!m.title || !m.release_date || seen.has(m.id as number)) continue
+      seen.add(m.id as number)
+      credits.push({
+        tmdbId: m.id as number,
+        title: m.title as string,
+        year: new Date(m.release_date as string).getFullYear(),
+        popularity: (m.popularity as number) ?? 0,
+        posterPath: m.poster_path || undefined,
+        tmdbRating: m.vote_average || undefined,
+      })
+    }
+    return credits.sort((a, b) => b.popularity - a.popularity)
+  } catch {
+    return []
+  }
+}
+
 // ─── Batch enrichment pipeline ───────────────────────────────────────────────
 
-export type ProgressCallback = (completed: number, total: number, failed: number) => void
+export type ProgressCallback = (completed: number, total: number, failed: number, newFilms?: Film[]) => void
 
 export async function enrichAllFilms(
   films: Film[],
@@ -205,7 +336,7 @@ export async function enrichAllFilms(
 
     completed += enriched.length
     failed += enriched.filter((f) => f.enrichError).length
-    onProgress(completed, total, failed)
+    onProgress(completed, total, failed, enriched)
 
     // Rate limit: wait between batches (not after the last one)
     if (i + BATCH_SIZE < unenriched.length) {

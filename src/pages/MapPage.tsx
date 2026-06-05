@@ -94,6 +94,16 @@ function flag(iso2: string): string {
     .join('')
 }
 
+// ─── Letterboxd country slug helper ──────────────────────────────────────────
+
+const LETTERBOXD_SLUG_OVERRIDES: Record<string, string> = {
+  'United States of America': 'usa',
+}
+
+function countryToLetterboxdSlug(country: string): string {
+  return LETTERBOXD_SLUG_OVERRIDES[country] ?? country.toLowerCase().replace(/\s+/g, '-')
+}
+
 // ─── Country side panel ───────────────────────────────────────────────────────
 
 function CountryPanel({
@@ -114,7 +124,7 @@ function CountryPanel({
     <>
       <div
         onClick={onClose}
-        style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 40 }}
+        style={{ position: 'fixed', inset: 0, backgroundColor: 'var(--overlay)', zIndex: 40 }}
       />
       <div
         style={{
@@ -257,7 +267,8 @@ function CountryPassport({
   countryFilmsMap: Map<string, Film[]>
   onCountryClick: (name: string) => void
 }) {
-  const visited = PASSPORT_COUNTRIES.filter(c => countryFilmsMap.has(c.name))
+  const [hoveredIso2, setHoveredIso2] = useState<string | null>(null)
+  const visitedCount = PASSPORT_COUNTRIES.filter(c => countryFilmsMap.has(c.name)).length
   const total = PASSPORT_COUNTRIES.length
 
   return (
@@ -274,14 +285,8 @@ function CountryPassport({
         >
           Country Passport
         </h2>
-        <span
-          style={{
-            fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 13,
-            color: 'var(--text-dim)',
-          }}
-        >
-          {visited.length} / {total}
+        <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13, color: 'var(--text-dim)' }}>
+          {visitedCount} / {total}
         </span>
       </div>
 
@@ -296,35 +301,52 @@ function CountryPassport({
         {PASSPORT_COUNTRIES.map(c => {
           const films = countryFilmsMap.get(c.name)
           const count = films?.length ?? 0
-          const visited = count > 0
+          const isVisited = count > 0
+          const isHovered = hoveredIso2 === c.iso2
 
           return (
             <button
               key={c.iso2}
-              onClick={() => visited && onCountryClick(c.name)}
-              title={`${c.name}${count > 0 ? ` · ${count} films` : ''}`}
+              onClick={() => {
+                if (isVisited) {
+                  onCountryClick(c.name)
+                } else {
+                  window.open(
+                    `https://letterboxd.com/films/country/${countryToLetterboxdSlug(c.name)}/`,
+                    '_blank',
+                    'noopener,noreferrer'
+                  )
+                }
+              }}
+              title={
+                isVisited
+                  ? `${c.name} · ${count} ${count === 1 ? 'film' : 'films'}`
+                  : `Explore ${c.name} on Letterboxd`
+              }
               style={{
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: 4,
                 padding: '8px 4px',
-                backgroundColor: visited ? 'var(--surface-raised)' : 'transparent',
-                border: visited ? '1px solid var(--border)' : '1px solid transparent',
+                backgroundColor: isVisited
+                  ? (isHovered ? 'var(--accent-dim)' : 'var(--surface-raised)')
+                  : 'transparent',
+                border: isVisited ? '1px solid var(--border)' : '1px solid transparent',
                 borderRadius: 'var(--radius-sm)',
-                cursor: visited ? 'pointer' : 'default',
-                opacity: visited ? 1 : 0.22,
+                cursor: 'pointer',
+                opacity: isVisited ? 1 : (isHovered ? 0.55 : 0.22),
                 transition: 'opacity 0.15s, background 0.15s',
                 position: 'relative',
               }}
-              onMouseEnter={e => { if (visited) e.currentTarget.style.backgroundColor = 'var(--accent-dim)' }}
-              onMouseLeave={e => { if (visited) e.currentTarget.style.backgroundColor = 'var(--surface-raised)' }}
+              onMouseEnter={() => setHoveredIso2(c.iso2)}
+              onMouseLeave={() => setHoveredIso2(null)}
             >
               <span style={{ fontSize: 22, lineHeight: 1 }}>{flag(c.iso2)}</span>
               <span
                 style={{
                   fontSize: 9,
-                  color: visited ? 'var(--text-secondary)' : 'var(--text-dim)',
+                  color: isVisited ? 'var(--text-secondary)' : 'var(--text-dim)',
                   textAlign: 'center',
                   lineHeight: 1.2,
                   overflow: 'hidden',
@@ -336,7 +358,7 @@ function CountryPassport({
               >
                 {c.name === 'United States of America' ? 'USA' : c.name}
               </span>
-              {visited && (
+              {isVisited && (
                 <span
                   style={{
                     position: 'absolute',
@@ -349,6 +371,19 @@ function CountryPassport({
                   }}
                 >
                   {count}
+                </span>
+              )}
+              {!isVisited && isHovered && (
+                <span
+                  style={{
+                    fontSize: 8,
+                    color: 'var(--accent)',
+                    textAlign: 'center',
+                    lineHeight: 1.2,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  explore →
                 </span>
               )}
             </button>
@@ -378,6 +413,7 @@ export default function MapPage() {
     const map = new Map<string, Film[]>()
     for (const film of allFilms) {
       for (const country of film.tmdbData?.productionCountries ?? []) {
+        if (country === 'Antarctica') continue
         if (!map.has(country)) map.set(country, [])
         map.get(country)!.push(film)
       }

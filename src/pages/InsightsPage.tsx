@@ -676,7 +676,7 @@ function GatedCard({ insight }: { insight: GatedInsight }) {
         alignItems: 'center',
         justifyContent: 'center',
         gap: 10,
-        backgroundColor: 'rgba(13, 15, 17, 0.55)',
+        backgroundColor: 'var(--overlay)',
         borderRadius: 'var(--radius-lg)',
       }}>
         {/* Lock icon SVG */}

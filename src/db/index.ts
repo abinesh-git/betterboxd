@@ -1,18 +1,21 @@
 import Dexie, { type Table } from 'dexie'
-import type { Film, UserProfile } from '../types'
+import type { Film, UserProfile, CachedPerson } from '../types'
 
 export class BetterBoxdDB extends Dexie {
-  films!: Table<Film, string>       // keyed by uri
-  profile!: Table<UserProfile, string> // keyed by username
+  films!: Table<Film, string>
+  profile!: Table<UserProfile, string>
+  persons!: Table<CachedPerson, number>
 
   constructor() {
     super('betterboxd')
 
     this.version(1).stores({
-      // Index the fields we query/filter/sort by
-      // uri is the primary key (inbound)
       films: 'uri, title, year, rating, enriched, onWatchlist',
       profile: 'username',
+    })
+
+    this.version(2).stores({
+      persons: 'tmdbPersonId, name',
     })
   }
 }
@@ -36,4 +39,15 @@ export async function getUnenrichedFilms(): Promise<Film[]> {
 
 export async function upsertFilms(films: Film[]) {
   await db.films.bulkPut(films)
+}
+
+// ─── Person cache helpers ────────────────────────────────────────────────────
+
+export async function getPerson(name: string): Promise<CachedPerson | null> {
+  const result = await db.persons.where('name').equals(name).first()
+  return result ?? null
+}
+
+export async function savePerson(person: CachedPerson): Promise<void> {
+  await db.persons.put(person)
 }
