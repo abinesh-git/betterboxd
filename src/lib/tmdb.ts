@@ -55,8 +55,26 @@ async function fetchTMDBDetails(tmdbId: number): Promise<TMDBData | null> {
 
   const d = await res.json()
 
-  const directors: string[] = (d.credits?.crew ?? [])
+  const crew: any[] = d.credits?.crew ?? []
+
+  const directors: string[] = crew
     .filter((c: any) => c.job === 'Director')
+    .map((c: any) => c.name as string)
+
+  const cinematographers: string[] = crew
+    .filter((c: any) => c.job === 'Director of Photography')
+    .map((c: any) => c.name as string)
+
+  const composers: string[] = crew
+    .filter((c: any) => c.job === 'Original Music Composer')
+    .map((c: any) => c.name as string)
+
+  const screenwriters: string[] = crew
+    .filter((c: any) => ['Screenplay', 'Story', 'Writer'].includes(c.job))
+    .map((c: any) => c.name as string)
+
+  const editors: string[] = crew
+    .filter((c: any) => c.job === 'Editor')
     .map((c: any) => c.name as string)
 
   const cast: string[] = (d.credits?.cast ?? [])
@@ -75,6 +93,10 @@ async function fetchTMDBDetails(tmdbId: number): Promise<TMDBData | null> {
     ),
     directors,
     cast,
+    cinematographers,
+    composers,
+    screenwriters,
+    editors,
     runtime: d.runtime ?? undefined,
     tmdbRating: d.vote_average ?? undefined,
     posterPath: d.poster_path ?? undefined,

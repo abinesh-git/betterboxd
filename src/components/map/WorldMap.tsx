@@ -161,8 +161,6 @@ export default function WorldMap({ data }: { data: CountryStat[] }) {
 
     svg.call(zoomBehavior as any)
     zoomRef.current = zoomBehavior
-    svg.node().__zoom_svg__ = svg
-    svg.node().__zoom_behavior__ = zoomBehavior
   }
 
   async function handleReset() {

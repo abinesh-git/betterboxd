@@ -105,6 +105,10 @@ export interface TMDBData {
   productionCountries: string[]
   directors: string[]
   cast: string[]                 // top 10
+  cinematographers: string[]
+  composers: string[]
+  screenwriters: string[]
+  editors: string[]
   runtime?: number
   tmdbRating?: number            // vote_average
   posterPath?: string
