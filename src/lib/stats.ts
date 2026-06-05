@@ -215,6 +215,10 @@ const LANGUAGE_NAMES: Record<string, string> = {
     zh: 'Chinese', zu: 'Zulu',
   }
   
+  export function languageName(code: string): string {
+    return LANGUAGE_NAMES[code] ?? code
+  }
+
   export async function languageStats(): Promise<AttributeStat[]> {
     const films = await getEnrichedFilms()
     const map = new Map<string, Film[]>()
